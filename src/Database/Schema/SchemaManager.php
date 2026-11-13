@@ -132,9 +132,12 @@ abstract class SchemaManager
     protected static function getColumnIndexes($table, $column)
     {
         $tableIndexes = static::getTableIndexes($table);
+        // values(): o filter preserva as chaves originais. No Laravel 13 os
+        // índices vêm em ordem alfabética e a PK pode não ser a chave 0, o que
+        // quebrava describeTable() com "Undefined array key 0".
         return collect($tableIndexes)->filter(function ($index) use ($column) {
             return in_array($column, $index['columns']);
-        })->toArray();
+        })->values()->toArray();
     }
 
     protected static function getTableForeignKeys($table)
