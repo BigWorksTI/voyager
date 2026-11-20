@@ -226,8 +226,11 @@ class VoyagerMediaController extends Controller
         // Check permission
         $this->authorize('browse_media');
 
-        $extension = $request->file->getClientOriginalExtension();
-        $name = Str::replaceLast('.'.$extension, '', $request->file->getClientOriginalName());
+        // A extensão sai do MIME detectado, não do nome enviado: um GIF chamado
+        // .html seria gravado como .html e servido como página na mesma origem.
+        $clientExtension = $request->file->getClientOriginalExtension();
+        $extension = $request->file->guessExtension() ?: $clientExtension;
+        $name = Str::replaceLast('.'.$clientExtension, '', $request->file->getClientOriginalName());
         $details = json_decode($request->get('details') ?? '{}');
         $absolute_path = Storage::disk($this->filesystem)->path($request->upload_path);
 
