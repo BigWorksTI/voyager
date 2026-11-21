@@ -5,9 +5,21 @@ namespace TCG\Voyager\Http\Controllers\ContentTypes;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class File extends BaseType
 {
+    /**
+     * Extensões aceitas quando config('voyager.storage.allowed_file_extensions')
+     * não está definida. Fora daqui: html, svg, xml, js e afins, que o
+     * navegador executaria na mesma origem do painel.
+     */
+    public const DEFAULT_ALLOWED_EXTENSIONS = [
+        'pdf', 'txt', 'csv', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp',
+        'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+        'zip', 'rar', '7z', 'mp3', 'mp4', 'ogg', 'wav',
+    ];
+
     /**
      * @return string
      */
@@ -23,20 +35,45 @@ class File extends BaseType
         $path = $this->generatePath();
 
         foreach ($files as $file) {
-            $filename = $this->generateFileName($file, $path);
+            $extension = $this->extensionOf($file);
+            $filename = $this->generateFileName($file, $path, $extension);
             $file->storeAs(
                 $path,
-                $filename.'.'.$file->getClientOriginalExtension(),
+                $filename.'.'.$extension,
                 config('voyager.storage.disk', 'public')
             );
 
             array_push($filesPath, [
-                'download_link' => $path.$filename.'.'.$file->getClientOriginalExtension(),
+                'download_link' => $path.$filename.'.'.$extension,
                 'original_name' => $file->getClientOriginalName(),
             ]);
         }
 
         return json_encode($filesPath);
+    }
+
+    /**
+     * Extensão pelo MIME detectado no conteúdo, não pelo nome enviado: um
+     * .html renomeado para .pdf continua html e um .html com conteúdo de PDF
+     * vira .pdf. Fora da allowlist, o upload é recusado.
+     *
+     * @return string
+     */
+    protected function extensionOf($file)
+    {
+        $extension = strtolower((string) $file->guessExtension());
+        $allowed = array_map('strtolower', (array) config(
+            'voyager.storage.allowed_file_extensions',
+            self::DEFAULT_ALLOWED_EXTENSIONS
+        ));
+
+        if ($extension === '' || !in_array($extension, $allowed, true)) {
+            throw ValidationException::withMessages([
+                $this->row->field => __('voyager::generic.mimetype_not_allowed'),
+            ]);
+        }
+
+        return $extension;
     }
 
     /**
@@ -50,21 +87,25 @@ class File extends BaseType
     /**
      * @return string
      */
-    protected function generateFileName($file, $path)
+    protected function generateFileName($file, $path, $extension = null)
     {
+        $extension = $extension ?? $this->extensionOf($file);
+        $disk = Storage::disk(config('voyager.storage.disk'));
+
         if (isset($this->options->preserveFileUploadName) && $this->options->preserveFileUploadName) {
-            $filename = basename($file->getClientOriginalName(), '.'.$file->getClientOriginalExtension());
+            $base = basename($file->getClientOriginalName(), '.'.$file->getClientOriginalExtension());
+            $filename = $base;
             $filename_counter = 1;
 
             // Make sure the filename does not exist, if it does make sure to add a number to the end 1, 2, 3, etc...
-            while (Storage::disk(config('voyager.storage.disk'))->exists($path.$filename.'.'.$file->getClientOriginalExtension())) {
-                $filename = basename($file->getClientOriginalName(), '.'.$file->getClientOriginalExtension()).(string) ($filename_counter++);
+            while ($disk->exists($path.$filename.'.'.$extension)) {
+                $filename = $base.(string) ($filename_counter++);
             }
         } else {
             $filename = Str::random(20);
 
             // Make sure the filename does not exist, if it does, just regenerate
-            while (Storage::disk(config('voyager.storage.disk'))->exists($path.$filename.'.'.$file->getClientOriginalExtension())) {
+            while ($disk->exists($path.$filename.'.'.$extension)) {
                 $filename = Str::random(20);
             }
         }
